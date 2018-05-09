@@ -6,9 +6,10 @@ import os
 import re
 from textwrap import dedent
 import uuid
-
+import logging
 import tornado
 import tornado.options
+from tornado.options import define, options
 from tornado.httpserver import HTTPServer
 from tornado.httputil import url_concat
 from tornado.log import app_log
@@ -231,7 +232,8 @@ class APIPoolHandler(AdminHandler):
     def pool(self):
         return self.settings['pool']
 
-def main():
+def main(): 
+
     tornado.options.define('cull_period', default=600,
         help="Interval (s) for culling idle containers."
     )
@@ -313,7 +315,7 @@ If host_network=True, the starting port assigned to notebook servers on the host
     tornado.options.define('redirect_uri', default="/tree",
         help="URI to redirect users to upon initial notebook launch"
     )
-    tornado.options.define('pool_size', default=10,
+    tornado.options.define('pool_size', default=1,
         help="Capacity for containers on this system. Will be prelaunched at startup."
     )
     tornado.options.define('pool_name', default=None,
@@ -371,6 +373,7 @@ default docker bridge. Affects the semantics of container_port and container_ip.
 
     tornado.options.parse_command_line()
     opts = tornado.options.options
+    
 
     api_token = os.getenv('API_AUTH_TOKEN')
     admin_token = os.getenv('ADMIN_AUTH_TOKEN')
@@ -405,6 +408,7 @@ default docker bridge. Affects the semantics of container_port and container_ip.
     if pool_name is None:
         # Derive a valid container name from the image name by default.
         pool_name = re.sub('[^a-zA-Z0_.-]+', '', opts.image.split(':')[0])
+
 
     container_config = dockworker.ContainerConfig(
         image=opts.image,
@@ -467,6 +471,7 @@ default docker bridge. Affects the semantics of container_port and container_ip.
         template_path=os.path.join(os.path.dirname(__file__), 'templates'),
         proxy_endpoint=proxy_endpoint,
         redirect_uri=opts.redirect_uri.lstrip('/'),
+        logging="debug"
     )
 
     admin_settings = dict(
@@ -494,6 +499,8 @@ default docker bridge. Affects the semantics of container_port and container_ip.
     culler.start()
 
     app_log.info("Listening on {}:{}".format(opts.ip or '*', opts.port))
+    app_log.info('handlers %s', handlers)
+
     application = tornado.web.Application(handlers, **settings)
     http_server = HTTPServer(application, xheaders=True)
     http_server.listen(opts.port, opts.ip)

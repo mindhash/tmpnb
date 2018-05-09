@@ -16,4 +16,4 @@ COPY . /srv/tmpnb/
 
 ENV DOCKER_HOST unix://docker.sock
 
-CMD python orchestrate.py
+CMD python my_orchestrate.py

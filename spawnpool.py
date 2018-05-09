@@ -242,7 +242,9 @@ class SpawnPool():
                 except EmptyPoolError:
                     app_log.warning("Unable to shrink: pool is diminished, all containers in use.")
                     break
-
+            
+            app_log.info('tasks', tasks)
+                    
             yield tasks
 
             # Summarize any actions taken to the log.
@@ -282,8 +284,11 @@ class SpawnPool():
         create_result = yield self.spawner.create_notebook_server(base_path=path,
                                                                   container_name=container_name,
                                                                   container_config=self.container_config)
+        print('create_result', create_result)
+
         container_id, host_ip, host_port, token = create_result
-        app_log.debug("Created notebook server [%s] for path [%s] at [%s:%s]", container_name, path, host_ip, host_port)
+        app_log.debug("Created notebook server [%s] for path [%s] at [%s:%s]", container_name, path, 2
+            , host_port)
 
         # Wait for the server to launch within the container before adding it to the pool or
         # serving it to a user.

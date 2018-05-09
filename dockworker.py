@@ -5,8 +5,10 @@ import os
 
 import docker
 import requests
+import logging
+from docker.utils import kwargs_from_env 
 
-from docker.utils import kwargs_from_env
+
 
 from tornado import gen
 from tornado.log import app_log
@@ -18,7 +20,7 @@ ContainerConfig = namedtuple('ContainerConfig', [
 ])
 
 # Number of times to retry API calls before giving up.
-RETRIES = 5
+RETRIES = 1
 
 
 class AsyncDockerClient():
@@ -28,7 +30,7 @@ class AsyncDockerClient():
     '''
     def __init__(self, docker_client, executor=None):
         if executor is None:
-            executor = ThreadPoolExecutor(max_workers=2)
+            executor = ThreadPoolExecutor(max_workers=1)
         self._docker_client = docker_client
         self.executor = executor
 
@@ -63,7 +65,7 @@ class DockerSpawner():
         # environment variable DOCKER_HOST takes precedence
         kwargs.setdefault('base_url', docker_host)
 
-        blocking_docker_client = docker.Client(version=version,
+        blocking_docker_client = docker.APIClient(version=version,
                                                timeout=timeout,
                                                **kwargs)
 
@@ -80,8 +82,8 @@ class DockerSpawner():
         '''Creates a notebook_server running off of `base_path`.
 
         Returns the (container_id, ip, port) tuple in a Future.'''
-
-        if container_config.host_network or container_config.docker_network:
+      
+        if container_config.host_network  or container_config.docker_network: 
             # Start with specified container port
             if self.port == 0:
                 self.port = int(container_config.container_port)
@@ -96,8 +98,7 @@ class DockerSpawner():
             port_bindings = {
                 container_config.container_port: (container_config.container_ip,)
             }
-
-        app_log.debug(container_config)
+ 
 
         # Assumes that the container_config.command is of a format like:
         #
@@ -147,7 +148,7 @@ class DockerSpawner():
                 volume_bindings[directory] = {
                     'bind': mount_path,
                     'mode': permissions
-                }
+                  }
 
         extra_hosts = dict(map(lambda h: tuple(h.split(':')),
                                container_config.extra_hosts))
@@ -159,11 +160,14 @@ class DockerSpawner():
             port_bindings=port_bindings,
             extra_hosts=extra_hosts,
             cpu_quota=container_config.cpu_quota,
-        )
+        ) 
+        
+        # host_config=client.create_host_config(port_bindings={8888: ('127.0.0.1', 80)})
 
-        host_config = docker.Client.create_host_config(self.docker_client,
+        host_config = docker.APIClient.create_host_config(self.docker_client,
                                                        **host_config)
         
+        app_log.info('host_config %s', host_config)
         cpu_shares = None
 
         if container_config.cpu_shares:
@@ -171,15 +175,27 @@ class DockerSpawner():
             cpu_shares = int(container_config.cpu_shares)
 
 
+        #self.docker_client.create_network('picaso1') 
+        #networking_config = self.docker_client.create_networking_config({'picaso1': self.docker_client.create_endpoint_config()
+        #})
+
+        endpoint_config = yield self.docker_client.create_endpoint_config()
+        networking_config = yield self._with_retries( self.docker_client.create_networking_config,
+            { container_config.docker_network: endpoint_config})
+
+        app_log.info('networking_config %s', networking_config)
+
         resp = yield self._with_retries(self.docker_client.create_container,
                                         image=container_config.image,
                                         user=container_config.container_user,
-                                        command=command,
+                                        command='',  
                                         volumes=volumes,
                                         host_config=host_config,
+                                        # networking_config=networking_config,
                                         cpu_shares=cpu_shares,
                                         name=container_name)
 
+        
         docker_warnings = resp.get('Warnings')
         if docker_warnings is not None:
             app_log.warning(docker_warnings)
@@ -187,30 +203,40 @@ class DockerSpawner():
         container_id = resp['Id']
         app_log.info("Created container {}".format(container_id))
         
+        print('container_config', container_config) 
+        print("Created container {}".format(container_id))
+
         if container_config.docker_network:
+            app_log.info('Connecting to docker network {%s}', container_config.docker_network)
             yield self._with_retries(self.docker_client.connect_container_to_network,
                                             container_id,
                                             container_config.docker_network,
             )
-
+        app_log.info('starting container')
+             
         yield self._with_retries(self.docker_client.start,
                                  container_id)
+        
+        app_log.info('docker_client.port',container_config.container_port)
 
         if container_config.host_network:
             host_port = port
             host_ip = container_config.container_ip
         elif container_config.docker_network:
             container_info = yield self._with_retries(self.docker_client.inspect_container, container_id)
-            host_port = port
+
+            host_port  = port
             # get ip of container on the specified docker network
             host_ip = container_info['NetworkSettings']['Networks'][container_config.docker_network]['IPAddress']
-        else:
-            container_network = yield self._with_retries(self.docker_client.port,
-                                                         container_id,
-                                                         container_config.container_port)
 
+        else:
+            app_log.info('docker_client.port',container_config.container_port)
+            container_network = yield self._with_retries(self.docker_client.port,
+                                                        container_id,
+                                                        container_config.container_port)            
             host_port = container_network[0]['HostPort']
-            host_ip = container_network[0]['HostIp']
+            host_ip =  container_network[0]['HostIp']  
+
 
         raise gen.Return((container_id, host_ip, int(host_port), token))
 
@@ -252,8 +278,7 @@ class DockerSpawner():
         '''Attempt a Docker API call.
 
         If an error occurs, retry up to "max_tries" times before letting the exception propagate
-        up the stack.'''
-
+        up the stack.''' 
         max_tries = kwargs.get('max_tries', RETRIES)
         try:
             if 'max_tries' in kwargs:
